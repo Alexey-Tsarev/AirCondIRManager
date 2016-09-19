@@ -1,5 +1,5 @@
 # AirCondIRManager (Air Conditioner IR Manager)
-This is an Arduino project to control your air conditioner automatically.
+This is an Arduino/ESP8266 project to control your air conditioner automatically.
 
 # Preface
 I made some kind of replacement of a industrial chiller for water cooling:
@@ -49,6 +49,24 @@ System outputs main parameters at the OLED screen:
 - temperature delta maximum  
 You can change last three parameters via configured remote control in runtime.
 
+Wifi features (ESP8266 only):
+ - WiFi access for easy configuring:
+   - creates WiFi AP to connect and provide real WiFi credentials (password randomly generated and printed at OLED screen)
+ - returns current status in json
+   - temperatures: current, minimum, maximum, alarm maximum, direction (grow or not)
+   - air conditioner status (0 - off, 1 - on, 2 - unknown)
+   - alarm flag
+   - uptime in microseconds
+   - free heap memory
+   - uptime
+   - example: {"uptime":"5209.197","millis":5209197,"temp":19.06,"tempMin":21,"tempMax":24,"tempMaxAlarm":28,"tempGrowStatus":0,"alarmStatus":0,"status":0,"name":"AirCondManager","id":1067883,"WLANStatus":1,"freeHeap":36728}
+ - Turns on, turns off air conditioner by sending commands:
+   - for turning on:  http://esp8266-ip-address/on
+   - for turning off: http://esp8266-ip-address/off
+ - Goes to Setup Mode: http://esp8266-ip-address/setup
+ - Reboots: http://esp8266-ip-address/reset
+ - Dummy test response: http://esp8266-ip-address/test
+
 # Work Logic
 If current temperature more then "temperature maximum",  
 then the system sends IR recorded command to air conditioner to turn it on.
@@ -56,7 +74,7 @@ then the system sends IR recorded command to air conditioner to turn it on.
 If current temperature less then "temperature minimum",  
 then the system sends IR recorded command to air conditioner to turn it off.
 
-If current temperature more then "temperature maximum" plus "temperature delta maximum",  
+If current temperature more then "temperature maximum" plus "temperature delta maximum",
 then an alarm sound activated.
 ---
 
