@@ -828,9 +828,9 @@ void handleURIRoot() {
     json["tempMin"] = theConfig.tempMin;
     json["tempMax"] = theConfig.tempMax;
     json["tempMaxAlarm"] = tempDeltaMaxValue;
+    json["status"] = status;
     json["tempGrowStatus"] = byte(tempGrowFlag);
     json["alarmStatus"] = byte(alarmFlag);
-    json["status"] = status;
     json["name"] = configOnConfigAPName;
     json["id"] = ESP.getChipId();
     json["WLANStatus"] = byte(WLANConnectedFlag);
