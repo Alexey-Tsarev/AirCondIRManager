@@ -8,7 +8,7 @@ $configZabbixHost = '127.0.0.1';
 $k[] = 'temp';
 $k[] = 'tempMin';
 $k[] = 'tempMax';
-$k[] = 'tempMaxAlarm';
+$k[] = 'tempAlarm';
 $k[] = 'tempGrowStatus';
 $k[] = 'alarmStatus';
 $k[] = 'status';
@@ -16,6 +16,7 @@ $k[] = 'freeHeap';
 $k[] = 'uptime';
 // End Cfg
 
+ini_set('default_socket_timeout', 15);
 $jsonRaw = file_get_contents($configUrl);
 
 if ($jsonRaw === false) {

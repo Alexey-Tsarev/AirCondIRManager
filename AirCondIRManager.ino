@@ -82,8 +82,8 @@ Real number  Title on plate  Description
 #define configIRCmdDelayMillis 2000
 #define configDisplayTempMin 10
 #define configDisplayTempMax 40
-#define configDisplayDeltaTempMin 1
-#define configDisplayDeltaTempMax 9
+#define configDisplayTempDeltaFromMaxMin 1
+#define configDisplayTempDeltaFromMaxMax 9
 unsigned int configBuzzerBeepHz = 4000;
 unsigned int configBuzzerBeepMillis = 100;
 unsigned int configBuzzerAlarmHz[] = {1000, 1500, 1200, 1300};
@@ -105,9 +105,9 @@ struct config {
     unsigned long buttonMaxUp;
     unsigned long buttonMaxDown;
 
-    byte tempDeltaMax;
-    unsigned long buttonDeltaMaxUp;
-    unsigned long buttonDeltaMaxDown;
+    byte tempDeltaFromMax;
+    unsigned long buttonDeltaFromMaxUp;
+    unsigned long buttonDeltaFromMaxDown;
 
     byte commandOnLen;
     byte commandOnDivider;
@@ -121,7 +121,7 @@ byte commandOn[capDataMaxLen];
 byte commandOff[capDataMaxLen];
 // End
 
-byte t1, t2, tempDeltaMaxValue, buzzerAlarmMelodyLen, curBuzzerAlarm, status;
+byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status;
 bool b, b1, gotTempFlag = false, tempGrowFlag, setupModeFlag = false, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag = false, tempMaxActiveFlag = false, beepFlag = false, alarmFlag = false, alarmBuzzerFlag, sendingCmdsFlag = false;
 char strBuf[32], strBuf2[32];
 unsigned int i, i1, i2, tempSensorWaitDataDelayMillis, startAddressConfig, startAddressConfigCommandOn, startAddressConfigCommandOff, EEPROMTotalSize;
@@ -209,6 +209,8 @@ const char strWiFiStatusChangedTo[] PROGMEM = "WiFi connection status changed to
 const char strStartingHTTPServer[] PROGMEM = "Starting HTTP server";
 const char strTextPlain[] PROGMEM = "text/plain";
 const char strBusy[] PROGMEM = "Busy";
+const char strOK[] PROGMEM = "OK";
+const char strNothingToDo[] PROGMEM = "Nothing to do";
 #endif
 // End Strings
 
@@ -596,11 +598,11 @@ void correctConfigValues() {
     if (theConfig.tempMax < configDisplayTempMin)
         theConfig.tempMax = configDisplayTempMin;
 
-    if (theConfig.tempDeltaMax > configDisplayDeltaTempMax)
-        theConfig.tempDeltaMax = configDisplayDeltaTempMax;
+    if (theConfig.tempDeltaFromMax > configDisplayTempDeltaFromMaxMax)
+        theConfig.tempDeltaFromMax = configDisplayTempDeltaFromMaxMax;
 
-    if (theConfig.tempDeltaMax < configDisplayDeltaTempMin)
-        theConfig.tempDeltaMax = configDisplayDeltaTempMin;
+    if (theConfig.tempDeltaFromMax < configDisplayTempDeltaFromMaxMin)
+        theConfig.tempDeltaFromMax = configDisplayTempDeltaFromMaxMin;
 
     if (theConfig.tempMin >= theConfig.tempMax)
         theConfig.tempMin = theConfig.tempMax - 1;
@@ -698,7 +700,7 @@ void printAndSendCmdsOFF() {
 
 
 void alarmHandler() {
-    if (curTemp >= tempDeltaMaxValue) {
+    if (curTemp >= tempAlarm) {
         alarmFlag = true;
 
         if (isElapsedTimeFromTS(lastBuzzerAlarmMillis, configBuzzerAlarmMillis[curBuzzerAlarm])) {
@@ -721,6 +723,15 @@ void alarmHandler() {
 
 double mapDouble(double x, double in_min, double in_max, double out_min, double out_max) {
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+
+void screenUpdateHandler() {
+    beep();
+    screenDelayFlag = true;
+    lastScreenDelayMillis = millis();
+    correctConfigValues();
+    updateConfig(1);
 }
 
 
@@ -827,7 +838,7 @@ void handleURIRoot() {
     json["temp"] = curTemp;
     json["tempMin"] = theConfig.tempMin;
     json["tempMax"] = theConfig.tempMax;
-    json["tempMaxAlarm"] = tempDeltaMaxValue;
+    json["tempAlarm"] = tempAlarm;
     json["status"] = status;
     json["tempGrowStatus"] = byte(tempGrowFlag);
     json["alarmStatus"] = byte(alarmFlag);
@@ -843,6 +854,36 @@ void handleURIRoot() {
 
     strcpy_P(strBuf, strTextPlain);
     server.send(200, strBuf, buf);
+}
+
+
+void handleURISet() {
+    for (i = 0; i < server.args(); i++) {
+
+        if (server.argName(i) == "tempMin") {
+            theConfig.tempMin = server.arg(i).toInt();
+            screenUpdateFlag = true;
+
+        } else if (server.argName(i) == "tempMax") {
+            theConfig.tempMax = server.arg(i).toInt();
+            screenUpdateFlag = true;
+
+        } else if (server.argName(i) == "tempAlarm") {
+            if (server.arg(i).toInt() > theConfig.tempMax)
+                theConfig.tempDeltaFromMax = server.arg(i).toInt() - theConfig.tempMax;
+            screenUpdateFlag = true;
+        }
+    }
+
+    if (screenUpdateFlag) {
+        strcpy_P(strBuf2, strOK);
+        screenUpdateHandler();
+    } else {
+        strcpy_P(strBuf2, strNothingToDo);
+    }
+
+    strcpy_P(strBuf, strTextPlain);
+    server.send(200, strBuf, strBuf2);
 }
 
 
@@ -912,6 +953,7 @@ void startHTTP() {
     server.on("/off", handleURIOff);
     server.on("/setup", handleURISetup);
     server.on("/reset", handleURIReset);
+    server.on("/set/", handleURISet);
     server.on("/test", handleURITest);
 
     server.begin();
@@ -923,7 +965,7 @@ void startHTTP() {
 void setupWLAN() {
     WiFiManager wifiManager;
 
-    // Reset settings, only for testing! This will reset your WiFi password
+    // Reset settings, only for testing! This will reset your WiFi settings
     //wifiManager.resetSettings();
 
     wifiManager.setTimeout(configOnConfigAPTimeOutSeconds);
@@ -1076,10 +1118,10 @@ void loop() {
                                 theConfig.buttonMaxDown = IRResults.value;
                                 break;
                             case 4:
-                                theConfig.buttonDeltaMaxUp = IRResults.value;
+                                theConfig.buttonDeltaFromMaxUp = IRResults.value;
                                 break;
                             case 5:
-                                theConfig.buttonDeltaMaxDown = IRResults.value;
+                                theConfig.buttonDeltaFromMaxDown = IRResults.value;
                                 break;
                             default:
                                 break;
@@ -1196,7 +1238,7 @@ void loop() {
                 lgPM(strPrintingScreen);
                 lgPM(str3DotSeparator);
 
-                tempDeltaMaxValue = theConfig.tempMax + theConfig.tempDeltaMax;
+                tempAlarm = theConfig.tempMax + theConfig.tempDeltaFromMax;
 
                 u8g2.firstPage();
                 do {
@@ -1206,7 +1248,7 @@ void loop() {
                     sprintf(strBuf, "%i %s", theConfig.tempMax, strBuf2);
                     u8g2.drawStr(0, 13, strBuf);
 
-                    sprintf(strBuf, "%i(%i)", tempDeltaMaxValue, theConfig.tempDeltaMax);
+                    sprintf(strBuf, "%i(%i)", tempAlarm, theConfig.tempDeltaFromMax);
                     u8g2.drawStr(75, 13, strBuf);
 
                     strcpy_P(strBuf2, strOFF);
@@ -1341,26 +1383,19 @@ void loop() {
                     logPM(strSetupButton_3);
                     theConfig.tempMax--;
                     screenUpdateFlag = true;
-                } else if (IRResults.value == theConfig.buttonDeltaMaxUp) {
+                } else if (IRResults.value == theConfig.buttonDeltaFromMaxUp) {
                     logPM(strSetupButton_4);
-                    theConfig.tempDeltaMax++;
+                    theConfig.tempDeltaFromMax++;
                     screenUpdateFlag = true;
-                } else if (IRResults.value == theConfig.buttonDeltaMaxDown) {
+                } else if (IRResults.value == theConfig.buttonDeltaFromMaxDown) {
                     logPM(strSetupButton_5);
-                    theConfig.tempDeltaMax--;
+                    theConfig.tempDeltaFromMax--;
                     screenUpdateFlag = true;
                 }
 
-                correctConfigValues();
-
-                if (screenUpdateFlag) {
-                    screenDelayFlag = true;
-                    lastScreenDelayMillis = millis();
-
-                    beep();
-                    updateConfig(1);
-                }
-                // End IR handler command
+                if (screenUpdateFlag)
+                    screenUpdateHandler();
+                // End IR command handler
 
                 IRRecv.resume();
             }
