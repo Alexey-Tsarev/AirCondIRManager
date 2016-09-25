@@ -52,17 +52,21 @@ You can change last three parameters via configured remote control in runtime.
 Wifi features (ESP8266 only):
  - WiFi access for easy configuring:
    - creates WiFi AP to connect and provide real WiFi credentials (password randomly generated and printed at OLED screen)
- - returns current status in json
+ - returns current status in json (http://esp8266-ip-address/, http://esp8266-ip-address/?pretty=1)
    - temperatures: current, minimum, maximum, alarm maximum, direction (grow or not)
    - air conditioner status (0 - off, 1 - on, 2 - unknown)
    - alarm flag
    - uptime in microseconds
    - free heap memory
    - uptime
-   - example: {"uptime":"5209.197","millis":5209197,"temp":19.06,"tempMin":21,"tempMax":24,"tempMaxAlarm":28,"tempGrowStatus":0,"alarmStatus":0,"status":0,"name":"AirCondManager","id":1067883,"WLANStatus":1,"freeHeap":36728}
+   - example: {"uptime":"13152.50","millis":13152050,"temp":20.25,"tempMin":18,"tempMax":24,"tempAlarm":25,"status":2,"tempGrowStatus":0,"alarmStatus":0,"name":"AirCondManager","id":1067883,"WLANStatus":1,"freeHeap":35712}
  - Turns on, turns off air conditioner by sending commands:
    - for turning on:  http://esp8266-ip-address/on
    - for turning off: http://esp8266-ip-address/off
+ - Set temperature settings (because of this, there is a way to use the device without TSOP and IR remote control):
+   - temperature minimum: http://esp8266-ip-address/set/?tempMin=19
+   - temperature maximum: http://esp8266-ip-address/set/?tempMax=24
+   - temperature alarm:   http://esp8266-ip-address/set/?tempAlarm=25
  - Goes to Setup Mode: http://esp8266-ip-address/setup
  - Reboots: http://esp8266-ip-address/reset
  - Dummy test response: http://esp8266-ip-address/test
