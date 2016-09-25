@@ -78,7 +78,7 @@ then the system sends IR recorded command to air conditioner to turn it on.
 If current temperature less then "temperature minimum",  
 then the system sends IR recorded command to air conditioner to turn it off.
 
-If current temperature more then "temperature maximum" plus "temperature delta maximum",
+If current temperature more then "temperature maximum" plus "temperature delta maximum", 
 then an alarm sound activated.
 ---
 
