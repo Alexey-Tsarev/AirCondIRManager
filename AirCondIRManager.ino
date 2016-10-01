@@ -159,7 +159,7 @@ const char strCapturedRaw[] PROGMEM = "Captured raw";
 const char strFoundMax[] PROGMEM = "Found max";
 const char strDividedBy[] PROGMEM = "Divided by";
 const char strMultipliedBy[] PROGMEM = "Multiplied by";
-const char strFoundTempSensor[] PROGMEM = "Found temperature sensor(s)";
+const char strFoundTemperatureSensor[] PROGMEM = "Found temperature sensor(s)";
 const char strTemperature[] PROGMEM = "Temperature ";
 const char strSensor[] PROGMEM = "sensor ";
 const char strNotFound[] PROGMEM = "not found";
@@ -172,8 +172,9 @@ const char strEEPROMDeviceAddress[] PROGMEM = "EEPROM DeviceAddress";
 const char strEEPROMSensorResolution[] PROGMEM = "EEPROM SensorResolution";
 const char strEEPROMDifferentData[] PROGMEM = "EEPROM has different data";
 const char strDone[] PROGMEM = "done";
-const char strGotTemp[] PROGMEM = "Got temperature";
-const char strGettingTemp[] PROGMEM = "Getting temp";
+const char strGettingTemperature[] PROGMEM = "Getting temperature";
+const char strFailed[] PROGMEM = "failed";
+const char strGotTemperature[] PROGMEM = "Got temperature";
 const char strGotIR[] PROGMEM = "Got IR";
 const char strPrintingScreen[] PROGMEM = "Printing screen";
 const char strIgnoredIR[] PROGMEM = "Ignored IR";
@@ -409,7 +410,7 @@ void findTempSensor() {
     while (true) {
         tempSensor.begin();
         i = tempSensor.getDeviceCount();
-        lgPM(strFoundTempSensor);
+        lgPM(strFoundTemperatureSensor);
         lgPM(strColonSeparator);
         log(i);
 
@@ -453,7 +454,8 @@ void findTempSensor() {
         lgPM(strColonSeparator);
         printDeviceAddress(tempDeviceAddress);
 
-        break;
+        if (tempSensor.validAddress(tempDeviceAddress))
+            break;
     }
 }
 
@@ -531,17 +533,22 @@ void beep(bool newLine = true) {
 
 
 void readTempSensorData() {
-    lgPM(strGettingTemp);
+    lgPM(strGettingTemperature);
     lgPM(str3DotSeparator);
 
-    if (tempSensor.getTempCByIndex(0) != DEVICE_DISCONNECTED_C)
-        curTemp = tempSensor.getTempCByIndex(0);
+    tmpTemp = tempSensor.getTempCByIndex(0);
 
-    lgPM(strDone);
-    lgPM(strDotSeparator);
-    lgPM(strGotTemp);
-    lgPM(strColonSeparator);
-    lgFmt(curTemp, 4);
+    if (tmpTemp == DEVICE_DISCONNECTED_C) {
+        lgPM(strFailed);
+    } else {
+        curTemp = tmpTemp;
+
+        lgPM(strDone);
+        lgPM(strDotSeparator);
+        lgPM(strGotTemperature);
+        lgPM(strColonSeparator);
+        lgFmt(curTemp, 4);
+    }
 
     if (!gotTempFlag) {
         gotTempFlag = true;
