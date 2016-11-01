@@ -121,8 +121,8 @@ byte commandOn[capDataMaxLen];
 byte commandOff[capDataMaxLen];
 // End
 
-byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status;
-bool b, b1, gotTempFlag = false, tempGrowFlag, setupModeFlag = false, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag = false, tempMaxActiveFlag = false, beepFlag = false, alarmFlag = false, alarmBuzzerFlag, sendingCmdsFlag = false;
+byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status = 2;
+bool b, b1, gotFirstTempFlag = false, tempGrowFlag, setupModeFlag = false, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag = false, tempMaxActiveFlag = false, beepFlag = false, alarmFlag = false, alarmBuzzerFlag, sendingCmdsFlag = false;
 char strBuf[32], strBuf2[32];
 unsigned int i, i1, i2, tempSensorWaitDataDelayMillis, startAddressConfig, startAddressConfigCommandOn, startAddressConfigCommandOff, EEPROMTotalSize;
 unsigned long lastTempRequestMillis, lastSetupModeButtonPressMillis, lastScreenDelayMillis, lastBuzzerAlarmMillis, lastIRSentMillis, lastBeepMillis;
@@ -135,8 +135,10 @@ unsigned int addMillis = 0;
 
 // Arduino, 4 pin OLED
 //U8G2_SSD1306_128X64_NONAME_1_4W_SW_SPI u8g2(U8G2_R0,/*SCL*/ 11,/*SDA*/ 10,/*cs*/ U8X8_PIN_NONE,/*D/C*/ 8,/*RST*/ 9);
+
 // ESP8266, 4 pin OLED
 //U8G2_SSD1306_128X64_NONAME_1_4W_SW_SPI u8g2(U8G2_R0,/*SCL*/ SCL,/*SDA*/ SDA,/*cs*/ U8X8_PIN_NONE,/*D/C*/ 13,/*RST*/ 12);
+
 // ESP8266, 2 pin OLED
 U8G2_SSD1306_128X64_NONAME_1_SW_I2C u8g2(U8G2_R0, /* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
 
@@ -502,7 +504,7 @@ void loadConfig() {
 }
 
 
-void updateConfig(byte configBlock = 0) {
+void saveConfig(byte configBlock = 0) {
     lgPM(strUpdatingEEPROM);
     lg(configBlock);
     lgPM(str3DotSeparator);
@@ -549,50 +551,10 @@ void readTempSensorData() {
         lgPM(strColonSeparator);
         lgFmt(curTemp, 4);
     }
-
-    if (!gotTempFlag) {
-        gotTempFlag = true;
-        log();
-
-#ifdef ESP8266
-        if (WiFi.status() == WL_CONNECTED)
-            startHTTP();
-        else
-            setupWLAN();
-#endif
-
-        lgPM(strSetupMode);
-        lgPM(strColonSeparator);
-        lg(i1);
-        lgPM(strDivideSeparator);
-        lg(i);
-        lgPM(strColonSeparator);
-
-        IRRecv.enableIRIn();
-
-        if (i1 == i) {
-            lgPM(strON);
-            setupModeFlag = true;
-            lastSetupModeButtonPressMillis = millis();
-            i1 = 0;
-            b1 = false;
-            log();
-            beep(false);
-            return;
-        } else {
-            lgPM(strOFF);
-        }
-    }
-
-    if (prevTemp != curTemp) {
-        tempGrowFlag = curTemp > prevTemp;
-        prevTemp = curTemp;
-        screenUpdateFlag = true;
-    }
 }
 
 
-void correctConfigValues() {
+void correctVars() {
     if (theConfig.tempMin > configDisplayTempMax)
         theConfig.tempMin = configDisplayTempMax;
 
@@ -619,6 +581,8 @@ void correctConfigValues() {
 
     if (theConfig.commandOffLen > capDataMaxLen)
         theConfig.commandOffLen = capDataMaxLen;
+
+    tempAlarm = theConfig.tempMax + theConfig.tempDeltaFromMax;
 }
 
 
@@ -636,8 +600,7 @@ void ignoreIRResults() {
 }
 
 
-void printAndSendCmds(const char strCmd[], byte cmd[capDataMaxLen], byte cmdLen, byte cmdDivider, bool &on, bool &off,
-                      byte repeats) {
+void printAndSendCmds(const char strCmd[], byte cmd[capDataMaxLen], byte cmdLen, byte cmdDivider, byte repeats) {
     byte i, j, len = strlen_P(strCmd);
 
     sendingCmdsFlag = true;
@@ -687,44 +650,42 @@ void printAndSendCmds(const char strCmd[], byte cmd[capDataMaxLen], byte cmdLen,
         log();
     }
 
-    on = true;
-    off = false;
     screenUpdateFlag = true;
     sendingCmdsFlag = false;
 }
 
 
-void printAndSendCmdsON() {
-    printAndSendCmds(strON, commandOn, theConfig.commandOnLen, theConfig.commandOnDivider, tempMaxActiveFlag,
-                     tempMinActiveFlag, configIRCmdRepeats);
-}
-
-
 void printAndSendCmdsOFF() {
-    printAndSendCmds(strOFF, commandOff, theConfig.commandOffLen, theConfig.commandOffDivider, tempMinActiveFlag,
-                     tempMaxActiveFlag, configIRCmdRepeats);
+    status = 0;
+    tempMinActiveFlag = true;
+    tempMaxActiveFlag = false;
+
+    printAndSendCmds(strOFF, commandOff, theConfig.commandOffLen, theConfig.commandOffDivider, configIRCmdRepeats);
 }
 
 
-void alarmHandler() {
-    if (curTemp >= tempAlarm) {
-        alarmFlag = true;
+void printAndSendCmdsON() {
+    status = 1;
+    tempMinActiveFlag = false;
+    tempMaxActiveFlag = true;
 
-        if (isElapsedTimeFromTS(lastBuzzerAlarmMillis, configBuzzerAlarmMillis[curBuzzerAlarm])) {
-            if (configBuzzerAlarmHz[curBuzzerAlarm] > 0)
-                tone(configPinBeeper, configBuzzerAlarmHz[curBuzzerAlarm],
-                     configBuzzerAlarmMillis[curBuzzerAlarm]);
+    printAndSendCmds(strON, commandOn, theConfig.commandOnLen, theConfig.commandOnDivider, configIRCmdRepeats);
+}
 
-            if (curBuzzerAlarm == buzzerAlarmMelodyLen - 1)
-                curBuzzerAlarm = 0;
-            else
-                curBuzzerAlarm++;
 
-            lastBuzzerAlarmMillis = millis();
-            alarmBuzzerFlag = true;
-        }
-    } else
-        alarmFlag = false;
+void alarmBuzzerHandler() {
+    if (alarmFlag && isElapsedTimeFromTS(lastBuzzerAlarmMillis, configBuzzerAlarmMillis[curBuzzerAlarm])) {
+        if (configBuzzerAlarmHz[curBuzzerAlarm] > 0)
+            tone(configPinBeeper, configBuzzerAlarmHz[curBuzzerAlarm], configBuzzerAlarmMillis[curBuzzerAlarm]);
+
+        if (curBuzzerAlarm == buzzerAlarmMelodyLen - 1)
+            curBuzzerAlarm = 0;
+        else
+            curBuzzerAlarm++;
+
+        lastBuzzerAlarmMillis = millis();
+        alarmBuzzerFlag = true;
+    }
 }
 
 
@@ -733,12 +694,12 @@ double mapDouble(double x, double in_min, double in_max, double out_min, double 
 }
 
 
-void screenUpdateHandler() {
+void configChangeHandler() {
     beep();
     screenDelayFlag = true;
     lastScreenDelayMillis = millis();
-    correctConfigValues();
-    updateConfig(1);
+    correctVars();
+    saveConfig(1);
 }
 
 
@@ -884,7 +845,7 @@ void handleURISet() {
 
     if (screenUpdateFlag) {
         strcpy_P(strBuf2, strOK);
-        screenUpdateHandler();
+        configChangeHandler();
     } else {
         strcpy_P(strBuf2, strNothingToDo);
     }
@@ -1022,7 +983,7 @@ void setup() {
     findTempSensor();
     calculateEEPROMStartAddresses();
     loadConfig();
-    correctConfigValues();
+    correctVars();
 
     lgPM(strEEPROMDeviceAddress);
     lgPM(strColonSeparator);
@@ -1052,7 +1013,7 @@ void setup() {
             theConfig.tempSensorDeviceAddress[i] = tempDeviceAddress[i];
 
         tempSensor.setResolution(tempDeviceAddress, configTempSensorResolution);
-        updateConfig(1);
+        saveConfig(1);
     }
     // End
 
@@ -1140,7 +1101,7 @@ void loop() {
                         beep();
 
                         if (i1 == 5)
-                            updateConfig(1);
+                            saveConfig(1);
                         else
                             IRRecv.resume();
 
@@ -1160,7 +1121,7 @@ void loop() {
                                              theConfig.commandOnDivider);
                         } while (theConfig.commandOnLen <= 10);
 
-                        updateConfig(2);
+                        saveConfig(2);
                         break;
                     case 7:
                         do {
@@ -1168,7 +1129,7 @@ void loop() {
                                              theConfig.commandOffDivider);
                         } while (theConfig.commandOffLen <= 10);
 
-                        updateConfig(3);
+                        saveConfig(3);
                         break;
                     default:
                         break;
@@ -1177,8 +1138,7 @@ void loop() {
                 beep();
 
                 if (i1 == 7) {
-                    beep();
-                    updateConfig(1);
+                    saveConfig(1);
                     loadConfig();
 
                     lgPM(strSetupMode);
@@ -1239,14 +1199,13 @@ void loop() {
             // End Print SetupMode dialog
         }
     } else {
-        if (gotTempFlag) {
-            // Print main screen
+        if (gotFirstTempFlag) {
+            // screenUpdateFlag
             if (screenUpdateFlag) {
                 lgPM(strPrintingScreen);
                 lgPM(str3DotSeparator);
 
-                tempAlarm = theConfig.tempMax + theConfig.tempDeltaFromMax;
-
+                // Print main screen
                 u8g2.firstPage();
                 do {
                     setFont1;
@@ -1265,18 +1224,12 @@ void loop() {
                     if (alarmFlag) {
                         strcpy(strBuf, "!!!");
                     } else {
-                        if ((tempMinActiveFlag) || (tempMaxActiveFlag)) {
-                            if (tempMinActiveFlag) {
-                                strcpy_P(strBuf, strOFF);
-                                status = 0;
-                            } else {
-                                strcpy_P(strBuf, strON);
-                                status = 1;
-                            }
-                        } else {
+                        if (status == 0)
+                            strcpy_P(strBuf, strOFF);
+                        else if (status == 1)
+                            strcpy_P(strBuf, strON);
+                        else
                             strcpy(strBuf, "???");
-                            status = 2;
-                        }
                     }
                     u8g2.drawStr(95, 63, strBuf);
 
@@ -1344,8 +1297,9 @@ void loop() {
 #ifdef ESP8266
                     ESP8266Tasks();
 #endif
-                    alarmHandler();
+                    alarmBuzzerHandler();
                 } while (u8g2.nextPage());
+                // End Print main screen
 
                 lgPM(strDone);
                 screenUpdateFlag = false;
@@ -1363,7 +1317,7 @@ void loop() {
 
                 log();
             }
-            // End Print main screen
+            // End screenUpdateFlag
 
             // Receive IR command
             if (IRRecv.decode(&IRResults)) {
@@ -1401,24 +1355,16 @@ void loop() {
                 }
 
                 if (screenUpdateFlag)
-                    screenUpdateHandler();
+                    configChangeHandler();
                 // End IR command handler
 
                 IRRecv.resume();
             }
             // End Receive IR command
 
-            // Temperature handler
-            if ((curTemp >= theConfig.tempMax) && (!tempMaxActiveFlag))
-                printAndSendCmdsON();
-
-            if ((curTemp <= theConfig.tempMin) && (!tempMinActiveFlag))
-                printAndSendCmdsOFF();
-
-            alarmHandler();
-            // End Temperature handler
+            alarmBuzzerHandler();
         } else {
-            // While gotTempFlag false (temperature sensor doesn't ready to return a data) trying to catch setupMode attempt
+            // While gotFirstTempFlag false (temperature sensor doesn't ready to return a data) trying to catch setupMode attempt
             if (b1)
                 tone(configPinLED, configLEDCarrierFreq);
 
@@ -1443,6 +1389,50 @@ void loop() {
             requestTemp();
             ignoreIRResults();
             log();
+
+            if (gotFirstTempFlag) {
+                // Change temperature handler
+                if (prevTemp != curTemp) {
+                    tempGrowFlag = curTemp > prevTemp;
+                    alarmFlag = curTemp >= tempAlarm;
+                    prevTemp = curTemp;
+                    screenUpdateFlag = true;
+
+                    if ((curTemp <= theConfig.tempMin) && !tempMinActiveFlag)
+                        printAndSendCmdsOFF();
+
+                    if ((curTemp >= theConfig.tempMax) && !tempMaxActiveFlag)
+                        printAndSendCmdsON();
+                }
+                // End Change temperature handler
+            } else {
+                gotFirstTempFlag = true;
+#ifdef ESP8266
+                if (WiFi.status() == WL_CONNECTED)
+                    startHTTP();
+                else
+                    setupWLAN();
+#endif
+                lgPM(strSetupMode);
+                lgPM(strColonSeparator);
+                lg(i1);
+                lgPM(strDivideSeparator);
+                lg(i);
+                lgPM(strColonSeparator);
+
+                IRRecv.enableIRIn();
+
+                if (i1 == i) {
+                    logPM(strON);
+                    setupModeFlag = true;
+                    lastSetupModeButtonPressMillis = millis();
+                    i1 = 0;
+                    b1 = false;
+                    beep();
+                } else {
+                    logPM(strOFF);
+                }
+            }
         }
         // End
     }
