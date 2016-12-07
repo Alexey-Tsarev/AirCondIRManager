@@ -16,8 +16,12 @@ $k[] = 'freeHeap';
 $k[] = 'uptime';
 // End Cfg
 
-ini_set('default_socket_timeout', 15);
-$jsonRaw = file_get_contents($configUrl);
+$curl = curl_init();
+curl_setopt($curl, CURLOPT_URL, $configUrl);
+curl_setopt($curl, CURLOPT_TIMEOUT, 5);
+curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+$jsonRaw = curl_exec($curl);
+curl_close($curl);
 
 if ($jsonRaw === false) {
     echo "Failed to get: $configUrl";

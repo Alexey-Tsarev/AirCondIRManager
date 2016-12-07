@@ -18,10 +18,11 @@ Also I wanted to create an easy configurable system (easy to change temperature 
 
 # Components
 In this project I used:
- - Arduino (tested with Arduino Uno)
+ - ESP8266 (Wemos D1) / Arduino (tested with Arduino Uno)
  - IR LED for emulating an air conditioner IR remote control
  - IR receiver (I used TSOP38238)
- - Waterproof DS18B20 temperature sensor
+ - IR remote control (optional, not necessary if an ESP8266 used)
+ - Waterproof temperature sensor DS18B20
  - Speaker
  - SSD1306 OLED display
 
@@ -37,28 +38,32 @@ At the setup mode you able to setup 6 buttons
 - temperature maximum down
 - temperature delta maximum up
 - temperature delta maximum down
+- max on time (minutes) up
+- max on time (minutes) down
 
 and two buttons related to an air conditioner:
-- turn air conditioner on
-- turn air conditioner off
+- turn air conditioner On
+- turn air conditioner Off
 
 System outputs main parameters at the OLED screen:
 - current temperature
 - temperature minimum
 - temperature maximum
-- temperature delta maximum  
-You can change last three parameters via configured remote control in runtime.
+- temperature delta
+- time (minutes) after last condition
+- maxOn time (minutes)
+You can change last 4 parameters via configured remote control in runtime.
 
 Wifi features (ESP8266 only):
  - WiFi access for easy configuring:
    - creates WiFi AP to connect and provide real WiFi credentials (password randomly generated and printed at OLED screen)
  - returns current status in json (http://esp8266-ip-address/, http://esp8266-ip-address/?pretty=1)
-   - temperatures: current, minimum, maximum, alarm maximum, direction (grow or not)
-   - air conditioner status (0 - off, 1 - on, 2 - unknown)
+   - temperatures: current, minimum, maximum, alarm, direction (grow or not)
+   - air conditioner status (0 - Off, 1 - On, 2 - Unknown)
    - alarm flag
    - uptime in microseconds
+   - runtime after changing last condition
    - free heap memory
-   - uptime
    - example: {"uptime":"13152.50","millis":13152050,"temp":20.25,"tempMin":18,"tempMax":24,"tempAlarm":25,"status":2,"tempGrowStatus":0,"alarmStatus":0,"name":"AirCondManager","id":1067883,"WLANStatus":1,"freeHeap":35712}
  - Turns on, turns off air conditioner by sending commands:
    - for turning on:  http://esp8266-ip-address/on
@@ -67,19 +72,26 @@ Wifi features (ESP8266 only):
    - temperature minimum: http://esp8266-ip-address/set/?tempMin=19
    - temperature maximum: http://esp8266-ip-address/set/?tempMax=24
    - temperature alarm:   http://esp8266-ip-address/set/?tempAlarm=25
+ - Set maxOn time:
+   - maxOn: http://esp8266-ip-address/set/?maxOn=30
  - Goes to Setup Mode: http://esp8266-ip-address/setup
  - Reboots: http://esp8266-ip-address/reset
  - Dummy test response: http://esp8266-ip-address/test
+ - There is a php script for sending parsed json data to Zabbix
 
 # Work Logic
-If current temperature more then "temperature maximum",  
-then the system sends IR recorded command to air conditioner to turn it on.
+If current temperature is higher than "temperature maximum",
+then the system sends IR recorded command to air conditioner to turn it On.
 
-If current temperature less then "temperature minimum",  
-then the system sends IR recorded command to air conditioner to turn it off.
+If current temperature is less than "temperature minimum",
+then the system sends IR recorded command to air conditioner to turn it Off.
 
-If current temperature more then "temperature maximum" plus "temperature delta maximum", 
+If current temperature is higher than "temperature maximum" plus "temperature delta maximum",
 then an alarm sound activated.
+
+If current status is On and elapsed time from last condition is more then maxOn (minutes),
+then the system sends IR recorded command to air conditioner to turn it Off.
+
 ---
 
 

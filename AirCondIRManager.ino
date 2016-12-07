@@ -80,10 +80,12 @@ Real number  Title on plate  Description
 #define configSerialSpeed 115200
 #define configIRCmdRepeats 5
 #define configIRCmdDelayMillis 2000
-#define configDisplayTempMin 10
-#define configDisplayTempMax 40
+#define configDisplayTempMin 1
+#define configDisplayTempMax 45
 #define configDisplayTempDeltaFromMaxMin 1
-#define configDisplayTempDeltaFromMaxMax 9
+#define configDisplayTempDeltaFromMaxMax 54
+#define configDisplayMaxOnMinutesMin 0
+#define configDisplayMaxOnMinutesMax 99
 unsigned int configBuzzerBeepHz = 4000;
 unsigned int configBuzzerBeepMillis = 100;
 unsigned int configBuzzerAlarmHz[] = {1000, 1500, 1200, 1300};
@@ -109,6 +111,10 @@ struct config {
     unsigned long buttonDeltaFromMaxUp;
     unsigned long buttonDeltaFromMaxDown;
 
+    byte maxOn;
+    unsigned long buttonMaxOnUp;
+    unsigned long buttonMaxOnDown;
+
     byte commandOnLen;
     byte commandOnDivider;
     byte commandOffLen;
@@ -121,16 +127,16 @@ byte commandOn[capDataMaxLen];
 byte commandOff[capDataMaxLen];
 // End
 
-byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status = 2;
-bool b, b1, gotFirstTempFlag = false, tempGrowFlag, setupModeFlag = false, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag = false, tempMaxActiveFlag = false, beepFlag = false, alarmFlag = false, alarmBuzzerFlag, sendingCmdsFlag = false;
+byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status = 2, maxOnCur, maxOnPrev;
+bool b, b1, gotFirstTempFlag, tempGrowFlag, setupModeFlag, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag, tempMaxActiveFlag, beepFlag, alarmFlag, alarmBuzzerFlag, sendingCmdsFlag, clientHandledFlag;
 char strBuf[32], strBuf2[32];
 unsigned int i, i1, i2, tempSensorWaitDataDelayMillis, startAddressConfig, startAddressConfigCommandOn, startAddressConfigCommandOff, EEPROMTotalSize;
-unsigned long lastTempRequestMillis, lastSetupModeButtonPressMillis, lastScreenDelayMillis, lastBuzzerAlarmMillis, lastIRSentMillis, lastBeepMillis;
+unsigned long lastTempRequestMillis, lastSetupModeButtonPressMillis, lastScreenDelayMillis, lastBuzzerAlarmMillis, lastIRSentMillis, lastBeepMillis, maxOnMillis;
 float curTemp, prevTemp = -274, tmpTemp;
 #ifdef ESP8266
-bool WLANConnectedFlag = false;
-unsigned long addSec = 0, prevMillis;
-unsigned int addMillis = 0;
+bool WiFiConnectedFlag;
+unsigned long uptimeAddSec, prevMillis;
+unsigned int uptimeAddMillis;
 #endif
 
 // Arduino, 4 pin OLED
@@ -195,12 +201,15 @@ const char strSetupButton_0[] PROGMEM = "MinUp";
 const char strSetupButton_1[] PROGMEM = "MinDn";
 const char strSetupButton_2[] PROGMEM = "MaxUp";
 const char strSetupButton_3[] PROGMEM = "MaxDn";
-const char strSetupButton_4[] PROGMEM = "DMaxU";
-const char strSetupButton_5[] PROGMEM = "DMaxD";
-const char strSetupButton_6[] PROGMEM = "ON";
-const char strSetupButton_7[] PROGMEM = "OFF";
+const char strSetupButton_4[] PROGMEM = "DeltaMaxUp";
+const char strSetupButton_5[] PROGMEM = "DeltaMaxDn";
+const char strSetupButton_6[] PROGMEM = "OnTimeUp";
+const char strSetupButton_7[] PROGMEM = "OnTimeDn";
+const char strSetupButton_8[] PROGMEM = "ON";
+const char strSetupButton_9[] PROGMEM = "OFF";
 const char *const strSetupButtons[] PROGMEM = {strSetupButton_0, strSetupButton_1, strSetupButton_2, strSetupButton_3,
-                                               strSetupButton_4, strSetupButton_5, strSetupButton_6, strSetupButton_7};
+                                               strSetupButton_4, strSetupButton_5, strSetupButton_6, strSetupButton_7,
+                                               strSetupButton_8, strSetupButton_9};
 #ifdef ESP8266
 const char strWaiting[] PROGMEM = "Waiting";
 const char strWiFi[] PROGMEM = "WiFi";
@@ -214,6 +223,7 @@ const char strTextPlain[] PROGMEM = "text/plain";
 const char strBusy[] PROGMEM = "Busy";
 const char strOK[] PROGMEM = "OK";
 const char strNothingToDo[] PROGMEM = "Nothing to do";
+const char strHandledClients[] PROGMEM = "Handled client(s)";
 #endif
 // End Strings
 
@@ -242,9 +252,8 @@ void logPM(const char s[]) {
 }
 
 
-bool isElapsedTimeFromTS(unsigned long start, unsigned long elapsed, bool isMicros = false) {
+unsigned long getElapsedTimeFromTS(unsigned long start, bool isMicros = false) {
     unsigned long cur;
-    unsigned long delta;
 
     if (isMicros)
         cur = micros();
@@ -252,12 +261,52 @@ bool isElapsedTimeFromTS(unsigned long start, unsigned long elapsed, bool isMicr
         cur = millis();
 
     if (cur >= start)
-        delta = cur - start;
+        return cur - start;
     else
-        delta = 0xFFFFFFFF - start + cur + 1;
-
-    return delta > elapsed;
+        return 0xFFFFFFFF - start + cur + 1;
 }
+
+
+bool isElapsedTimeFromTS(unsigned long start, unsigned long elapsed, bool isMicros = false) {
+    return getElapsedTimeFromTS(start, isMicros) >= elapsed;
+}
+
+
+#ifdef ESP8266
+
+void ESP8266Tasks(bool doYield = true) {
+    if (WiFiConnectedFlag) {
+        i2 = 0;
+
+        do {
+            yield();
+            clientHandledFlag = false;
+            server.handleClient();
+            i2++;
+        } while (clientHandledFlag);
+
+        if (i2 >= 2) {
+            lgPM(strHandledClients);
+            lgPM(strColonSeparator);
+            log(i - 1);
+        }
+    }
+
+    if (beepFlag && isElapsedTimeFromTS(lastBeepMillis, configBuzzerBeepMillis)) {
+        beepFlag = false;
+        noTone(configPinBeeper);
+    }
+
+    if (alarmBuzzerFlag && isElapsedTimeFromTS(lastBuzzerAlarmMillis, configBuzzerAlarmMillis[curBuzzerAlarm])) {
+        alarmBuzzerFlag = false;
+        noTone(configPinBeeper);
+    }
+
+    if (doYield)
+        yield();
+}
+
+#endif
 
 
 void sendIR(byte *raw, byte rawLen, byte pinLED, unsigned int carrierFreq, byte multiplier = 1) {
@@ -293,7 +342,7 @@ void sendIR(byte *raw, byte rawLen, byte pinLED, unsigned int carrierFreq, byte 
 
                 carrierWaitMicros += halfPeroidMicros;
 
-                while (!isElapsedTimeFromTS(startTSMicros, carrierWaitMicros, true));
+                while (!isElapsedTimeFromTS(startTSMicros, (unsigned long) carrierWaitMicros, true));
 
                 carrierOnFlag = !carrierOnFlag;
             }
@@ -554,6 +603,20 @@ void readTempSensorData() {
 }
 
 
+void tempHandler() {
+    tempGrowFlag = curTemp > prevTemp;
+    alarmFlag = curTemp >= tempAlarm;
+    prevTemp = curTemp;
+    screenUpdateFlag = true;
+
+    if ((curTemp <= theConfig.tempMin) && !tempMinActiveFlag)
+        printAndSendCmdsOFF();
+
+    if ((curTemp >= theConfig.tempMax) && !tempMaxActiveFlag)
+        printAndSendCmdsON();
+}
+
+
 void correctVars() {
     if (theConfig.tempMin > configDisplayTempMax)
         theConfig.tempMin = configDisplayTempMax;
@@ -573,6 +636,12 @@ void correctVars() {
     if (theConfig.tempDeltaFromMax < configDisplayTempDeltaFromMaxMin)
         theConfig.tempDeltaFromMax = configDisplayTempDeltaFromMaxMin;
 
+    if (theConfig.maxOn > configDisplayMaxOnMinutesMax)
+        theConfig.maxOn = configDisplayMaxOnMinutesMax;
+
+    if (theConfig.maxOn < configDisplayMaxOnMinutesMin)
+        theConfig.maxOn = configDisplayMaxOnMinutesMin;
+
     if (theConfig.tempMin >= theConfig.tempMax)
         theConfig.tempMin = theConfig.tempMax - 1;
 
@@ -583,6 +652,11 @@ void correctVars() {
         theConfig.commandOffLen = capDataMaxLen;
 
     tempAlarm = theConfig.tempMax + theConfig.tempDeltaFromMax;
+
+    if (theConfig.maxOn == 0)
+        maxOnMillis = 0;
+    else
+        maxOnMillis = (unsigned long) (theConfig.maxOn * 60000);
 }
 
 
@@ -619,7 +693,7 @@ void printAndSendCmds(const char strCmd[], byte cmd[capDataMaxLen], byte cmdLen,
             u8g2.drawStr(50, 60, strBuf);
 
             for (j = 0; j < len; j++)
-                strBuf[j] = pgm_read_byte_near(strCmd + j);
+                strBuf[j] = (char) pgm_read_byte_near(strCmd + j);
             strBuf[j] = 0;
 
             u8g2.drawStr(50, 35, strBuf);
@@ -699,44 +773,41 @@ void configChangeHandler() {
     screenDelayFlag = true;
     lastScreenDelayMillis = millis();
     correctVars();
+    tempHandler();
     saveConfig(1);
 }
 
 
 #ifdef ESP8266
 
-void ESP8266Tasks() {
-    yield();
-    server.handleClient();
+void WiFiEvent(WiFiEvent_t event) {
+    switch (event) {
+        case WIFI_EVENT_STAMODE_GOT_IP:
+            if (!WiFiConnectedFlag) {
+                WiFiConnectedFlag = true;
 
-    if ((WiFi.status() == WL_CONNECTED) && (WLANConnectedFlag == false)) {
-        WLANConnectedFlag = true;
+                lgPM(strWiFiStatusChangedTo);
+                lgPM(strColonSeparator);
+                logPM(strON);
 
-        lgPM(strWiFiStatusChangedTo);
-        lgPM(strColonSeparator);
-        logPM(strON);
+                lgPM(strConnectedTo);
+                lgPM(strColonSeparator);
+                lg(WiFi.SSID());
+                lgPM(strDivideSeparator);
+                log(WiFi.localIP());
+            }
 
-        lgPM(strConnectedTo);
-        lgPM(strColonSeparator);
-        lg(WiFi.SSID());
-        lgPM(strDivideSeparator);
-        log(WiFi.localIP());
-    } else if ((WiFi.status() != WL_CONNECTED) && (WLANConnectedFlag == true)) {
-        WLANConnectedFlag = false;
+            break;
+        case WIFI_EVENT_STAMODE_DISCONNECTED:
+            if (WiFiConnectedFlag) {
+                WiFiConnectedFlag = false;
 
-        lgPM(strWiFiStatusChangedTo);
-        lgPM(strColonSeparator);
-        logPM(strOFF);
-    }
+                lgPM(strWiFiStatusChangedTo);
+                lgPM(strColonSeparator);
+                logPM(strOFF);
+            }
 
-    if (beepFlag && isElapsedTimeFromTS(lastBeepMillis, configBuzzerBeepMillis)) {
-        beepFlag = false;
-        noTone(configPinBeeper);
-    }
-
-    if (alarmBuzzerFlag && isElapsedTimeFromTS(lastBuzzerAlarmMillis, configBuzzerAlarmMillis[curBuzzerAlarm])) {
-        alarmBuzzerFlag = false;
-        noTone(configPinBeeper);
+            break;
     }
 }
 
@@ -773,46 +844,57 @@ void APConfigCallback(WiFiManager *myWiFiManager) {
 }
 
 
-void handleURIRoot() {
-    char buf[512];
-    StaticJsonBuffer<512> jsonBuffer;
-    JsonObject &json = jsonBuffer.createObject();
-
-    // Calculate uptime
+void getCurTS(char out[]) {
     unsigned long curMillis = millis();
     unsigned long sec = curMillis / 1000;
-    unsigned int millis = curMillis - sec * 1000;
+    unsigned int millis = (unsigned int) (curMillis - sec * 1000);
 
     if (prevMillis > curMillis) {
-        addSec += 4294967;
-        addMillis += 296;
+        uptimeAddSec += 4294967;
+        uptimeAddMillis += 296;
     }
 
-    millis += addMillis;
+    millis += uptimeAddMillis;
 
     if (millis >= 1000) {
         sec++;
         millis -= 1000;
     }
 
-    sec += addSec;
+    sec += uptimeAddSec;
     prevMillis = curMillis;
 
-    sprintf(strBuf, "%lu.%i", sec, millis);
-    json["uptime"] = strBuf;
-    // End
+    sprintf(out, "%lu.%i", sec, millis);
+}
 
-    json["millis"] = curMillis;
+
+void sendResponse(const char data[]) {
+    strcpy_P(strBuf, strTextPlain);
+    server.send(200, strBuf, data);
+    clientHandledFlag = true;
+}
+
+
+void handleURIRoot() {
+    char buf[512];
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject &json = jsonBuffer.createObject();
+
+    json["name"] = configOnConfigAPName;
+    json["id"] = ESP.getChipId();
+
+    getCurTS(strBuf);
+    json["uptime"] = strBuf;
+
     json["temp"] = curTemp;
     json["tempMin"] = theConfig.tempMin;
     json["tempMax"] = theConfig.tempMax;
     json["tempAlarm"] = tempAlarm;
+    json["maxOn"] = theConfig.maxOn;
     json["status"] = status;
     json["tempGrowStatus"] = byte(tempGrowFlag);
     json["alarmStatus"] = byte(alarmFlag);
-    json["name"] = configOnConfigAPName;
-    json["id"] = ESP.getChipId();
-    json["WLANStatus"] = byte(WLANConnectedFlag);
+    json["WiFiStatus"] = byte(WiFiConnectedFlag);
     json["freeHeap"] = ESP.getFreeHeap();
 
     if (server.arg("pretty") == "1")
@@ -820,8 +902,7 @@ void handleURIRoot() {
     else
         json.printTo(buf, sizeof(buf));
 
-    strcpy_P(strBuf, strTextPlain);
-    server.send(200, strBuf, buf);
+    sendResponse(buf);
 }
 
 
@@ -840,6 +921,10 @@ void handleURISet() {
             if (server.arg(i).toInt() > theConfig.tempMax)
                 theConfig.tempDeltaFromMax = server.arg(i).toInt() - theConfig.tempMax;
             screenUpdateFlag = true;
+
+        } else if (server.argName(i) == "maxOn") {
+            theConfig.maxOn = server.arg(i).toInt();
+            screenUpdateFlag = true;
         }
     }
 
@@ -850,20 +935,17 @@ void handleURISet() {
         strcpy_P(strBuf2, strNothingToDo);
     }
 
-    strcpy_P(strBuf, strTextPlain);
-    server.send(200, strBuf, strBuf2);
+    sendResponse(strBuf2);
 }
 
 
 void handleURIOn() {
-    strcpy_P(strBuf, strTextPlain);
-
     if (sendingCmdsFlag) {
         strcpy_P(strBuf2, strBusy);
-        server.send(200, strBuf, strBuf2);
+        sendResponse(strBuf2);
     } else {
         strcpy_P(strBuf2, strON);
-        server.send(200, strBuf, strBuf2);
+        sendResponse(strBuf2);
 
         printAndSendCmdsON();
     }
@@ -871,14 +953,12 @@ void handleURIOn() {
 
 
 void handleURIOff() {
-    strcpy_P(strBuf, strTextPlain);
-
     if (sendingCmdsFlag) {
         strcpy_P(strBuf2, strBusy);
-        server.send(200, strBuf, strBuf2);
+        sendResponse(strBuf2);
     } else {
         strcpy_P(strBuf2, strOFF);
-        server.send(200, strBuf, strBuf2);
+        sendResponse(strBuf2);
 
         printAndSendCmdsOFF();
     }
@@ -886,9 +966,8 @@ void handleURIOff() {
 
 
 void handleURISetup() {
-    strcpy_P(strBuf, strTextPlain);
     strcpy_P(strBuf2, strSetupMode);
-    server.send(200, strBuf, strBuf2);
+    sendResponse(strBuf2);
 
     setupModeFlag = true;
     lastSetupModeButtonPressMillis = millis();
@@ -899,16 +978,19 @@ void handleURISetup() {
 
 
 void handleURIReset() {
-    strcpy_P(strBuf, strTextPlain);
-    server.send(200, strBuf, server.uri());
-
+    sendResponse(server.uri().c_str());
     ESP.reset();
 }
 
 
+void handleURIRestart() {
+    sendResponse(server.uri().c_str());
+    ESP.restart();
+}
+
+
 void handleURITest() {
-    strcpy_P(strBuf, strTextPlain);
-    server.send(200, strBuf, server.uri());
+    sendResponse(server.uri().c_str());
 }
 
 
@@ -921,6 +1003,7 @@ void startHTTP() {
     server.on("/off", handleURIOff);
     server.on("/setup", handleURISetup);
     server.on("/reset", handleURIReset);
+    server.on("/restart", handleURIRestart);
     server.on("/set/", handleURISet);
     server.on("/test", handleURITest);
 
@@ -930,7 +1013,7 @@ void startHTTP() {
 }
 
 
-void setupWLAN() {
+void setupWiFi() {
     WiFiManager wifiManager;
 
     // Reset settings, only for testing! This will reset your WiFi settings
@@ -1026,6 +1109,8 @@ void setup() {
     i1 = 0;
 
 #ifdef ESP8266
+    WiFi.onEvent(WiFiEvent);
+
     u8g2.firstPage();
     setFont1;
     do {
@@ -1059,7 +1144,7 @@ void loop() {
 
         if (b1) {
             // Record IR
-            if (i1 <= 5) {
+            if (i1 <= 7) {
                 // Record common IR
                 if (IRRecv.decode(&IRResults)) {
 
@@ -1091,6 +1176,12 @@ void loop() {
                             case 5:
                                 theConfig.buttonDeltaFromMaxDown = IRResults.value;
                                 break;
+                            case 6:
+                                theConfig.buttonMaxOnUp = IRResults.value;
+                                break;
+                            case 7:
+                                theConfig.buttonMaxOnDown = IRResults.value;
+                                break;
                             default:
                                 break;
                         }
@@ -1100,7 +1191,7 @@ void loop() {
 
                         beep();
 
-                        if (i1 == 5)
+                        if (i1 == 7)
                             saveConfig(1);
                         else
                             IRRecv.resume();
@@ -1115,7 +1206,7 @@ void loop() {
             } else {
                 // Record Air Cond IR
                 switch (i1) {
-                    case 6:
+                    case 8:
                         do {
                             captureRawIRData(commandOn, commandOff, commandOn, theConfig.commandOnLen,
                                              theConfig.commandOnDivider);
@@ -1123,7 +1214,7 @@ void loop() {
 
                         saveConfig(2);
                         break;
-                    case 7:
+                    case 9:
                         do {
                             captureRawIRData(commandOn, commandOff, commandOff, theConfig.commandOffLen,
                                              theConfig.commandOffDivider);
@@ -1137,7 +1228,7 @@ void loop() {
 
                 beep();
 
-                if (i1 == 7) {
+                if (i1 == 9) {
                     saveConfig(1);
                     loadConfig();
 
@@ -1210,27 +1301,29 @@ void loop() {
                 do {
                     setFont1;
 
-                    strcpy_P(strBuf2, strON);
-                    sprintf(strBuf, "%i %s", theConfig.tempMax, strBuf2);
+                    sprintf(strBuf, "%02i %2i", theConfig.tempMax, tempAlarm);
                     u8g2.drawStr(0, 13, strBuf);
 
-                    sprintf(strBuf, "%i(%i)", tempAlarm, theConfig.tempDeltaFromMax);
-                    u8g2.drawStr(75, 13, strBuf);
+                    sprintf(strBuf, "%3i/%i", maxOnCur, theConfig.maxOn);
+                    u8g2.drawStr(64, 13, strBuf);
 
-                    strcpy_P(strBuf2, strOFF);
-                    sprintf(strBuf, "%i %s", theConfig.tempMin, strBuf2);
+                    sprintf(strBuf, "%02i", theConfig.tempMin);
                     u8g2.drawStr(0, 63, strBuf);
 
-                    if (alarmFlag) {
+                    if (alarmFlag)
                         strcpy(strBuf, "!!!");
-                    } else {
-                        if (status == 0)
-                            strcpy_P(strBuf, strOFF);
-                        else if (status == 1)
-                            strcpy_P(strBuf, strON);
-                        else
-                            strcpy(strBuf, "???");
-                    }
+                    else
+                        strcpy(strBuf, "   ");
+
+                    u8g2.drawStr(40, 63, strBuf);
+
+                    if (status == 0)
+                        strcpy_P(strBuf, strOFF);
+                    else if (status == 1)
+                        strcpy_P(strBuf, strON);
+                    else
+                        strcpy(strBuf, "???");
+
                     u8g2.drawStr(95, 63, strBuf);
 
                     setFont2;
@@ -1255,7 +1348,7 @@ void loop() {
                     if (curTemp > theConfig.tempMax)
                         tmpTemp = theConfig.tempMax;
 
-                    i = i2 - (mapDouble(tmpTemp, theConfig.tempMin, theConfig.tempMax, i1, i2) - i1);
+                    i = (unsigned int) (i2 - (mapDouble(tmpTemp, theConfig.tempMin, theConfig.tempMax, i1, i2) - i1));
 
                     i1 = 16;
 
@@ -1352,6 +1445,17 @@ void loop() {
                     logPM(strSetupButton_5);
                     theConfig.tempDeltaFromMax--;
                     screenUpdateFlag = true;
+                } else if (IRResults.value == theConfig.buttonMaxOnUp) {
+                    logPM(strSetupButton_6);
+                    theConfig.maxOn++;
+                    screenUpdateFlag = true;
+                } else if (IRResults.value == theConfig.buttonMaxOnDown) {
+                    logPM(strSetupButton_7);
+
+                    if (theConfig.maxOn >= 1)
+                        theConfig.maxOn--;
+
+                    screenUpdateFlag = true;
                 }
 
                 if (screenUpdateFlag)
@@ -1391,27 +1495,27 @@ void loop() {
             log();
 
             if (gotFirstTempFlag) {
-                // Change temperature handler
-                if (prevTemp != curTemp) {
-                    tempGrowFlag = curTemp > prevTemp;
-                    alarmFlag = curTemp >= tempAlarm;
-                    prevTemp = curTemp;
+                maxOnCur = (byte) (getElapsedTimeFromTS(lastIRSentMillis) / 60000);
+
+                if (maxOnPrev != maxOnCur) {
+                    maxOnPrev = maxOnCur;
                     screenUpdateFlag = true;
-
-                    if ((curTemp <= theConfig.tempMin) && !tempMinActiveFlag)
-                        printAndSendCmdsOFF();
-
-                    if ((curTemp >= theConfig.tempMax) && !tempMaxActiveFlag)
-                        printAndSendCmdsON();
                 }
-                // End Change temperature handler
+
+                if ((status == 1) &&
+                    (curTemp > theConfig.tempMin) && (curTemp < theConfig.tempMax) &&
+                    (theConfig.maxOn != 0) && isElapsedTimeFromTS(lastIRSentMillis, maxOnMillis))
+                    printAndSendCmdsOFF();
+
+                if (prevTemp != curTemp)
+                    tempHandler();
             } else {
                 gotFirstTempFlag = true;
 #ifdef ESP8266
                 if (WiFi.status() == WL_CONNECTED)
                     startHTTP();
                 else
-                    setupWLAN();
+                    setupWiFi();
 #endif
                 lgPM(strSetupMode);
                 lgPM(strColonSeparator);
@@ -1438,6 +1542,6 @@ void loop() {
     }
 
 #ifdef ESP8266
-    ESP8266Tasks();
+    ESP8266Tasks(false);
 #endif
 }
