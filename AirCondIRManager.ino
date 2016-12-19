@@ -128,7 +128,7 @@ byte commandOff[capDataMaxLen];
 // End
 
 byte t1, t2, tempAlarm, buzzerAlarmMelodyLen, curBuzzerAlarm, status = 2, maxOnCur, maxOnPrev;
-bool b, b1, gotFirstTempFlag, tempGrowFlag, setupModeFlag, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag, tempMaxActiveFlag, beepFlag, alarmFlag, alarmBuzzerFlag, sendingCmdsFlag, clientHandledFlag;
+bool b, b1, gotFirstTempFlag, tempGrowFlag, setupModeFlag, screenUpdateFlag, screenDelayFlag, tempMinActiveFlag, tempMaxActiveFlag, beepFlag, alarmFlag, alarmBuzzerFlag, sendingCmdsFlag, clientHandledFlag, overOnFlag;
 char strBuf[32], strBuf2[32];
 unsigned int i, i1, i2, tempSensorWaitDataDelayMillis, startAddressConfig, startAddressConfigCommandOn, startAddressConfigCommandOff, EEPROMTotalSize;
 unsigned long lastTempRequestMillis, lastSetupModeButtonPressMillis, lastScreenDelayMillis, lastBuzzerAlarmMillis, lastIRSentMillis, lastBeepMillis, maxOnMillis;
@@ -605,7 +605,7 @@ void readTempSensorData() {
 
 void tempHandler() {
     tempGrowFlag = curTemp > prevTemp;
-    alarmFlag = curTemp >= tempAlarm;
+    alarmFlag = overOnFlag || curTemp >= tempAlarm;
     prevTemp = curTemp;
     screenUpdateFlag = true;
 
@@ -890,6 +890,7 @@ void handleURIRoot() {
     json["tempMin"] = theConfig.tempMin;
     json["tempMax"] = theConfig.tempMax;
     json["tempAlarm"] = tempAlarm;
+    json["maxOnCur"] = maxOnCur;
     json["maxOn"] = theConfig.maxOn;
     json["status"] = status;
     json["tempGrowStatus"] = byte(tempGrowFlag);
@@ -1502,10 +1503,19 @@ void loop() {
                     screenUpdateFlag = true;
                 }
 
-                if ((status == 1) &&
-                    (curTemp > theConfig.tempMin) && (curTemp < theConfig.tempMax) &&
-                    (theConfig.maxOn != 0) && isElapsedTimeFromTS(lastIRSentMillis, maxOnMillis))
-                    printAndSendCmdsOFF();
+                if ((theConfig.maxOn != 0) && (status == 1) && isElapsedTimeFromTS(lastIRSentMillis, maxOnMillis)) {
+                    if (curTemp > theConfig.tempMax) {
+                        overOnFlag = true;
+                        alarmFlag = true;
+                    } else {
+                        if (overOnFlag) {
+                            lastIRSentMillis = millis();
+                            overOnFlag = false;
+                            alarmFlag = false;
+                        } else
+                            printAndSendCmdsOFF();
+                    }
+                }
 
                 if (prevTemp != curTemp)
                     tempHandler();

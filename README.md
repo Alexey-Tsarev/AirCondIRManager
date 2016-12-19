@@ -64,7 +64,7 @@ Wifi features (ESP8266 only):
    - uptime in microseconds
    - runtime after changing last condition
    - free heap memory
-   - example: {"uptime":"13152.50","millis":13152050,"temp":20.25,"tempMin":18,"tempMax":24,"tempAlarm":25,"status":2,"tempGrowStatus":0,"alarmStatus":0,"name":"AirCondManager","id":1067883,"WLANStatus":1,"freeHeap":35712}
+   - example: {"name":"AirCondManager","id":1067883,"uptime":"317.873","temp":19.31,"tempMin":15,"tempMax":22,"tempAlarm":28,"maxOnCur":5,"maxOn":20,"status":2,"tempGrowStatus":1,"alarmStatus":0,"WiFiStatus":1,"freeHeap":35976}
  - Turns on, turns off air conditioner by sending commands:
    - for turning on:  http://esp8266-ip-address/on
    - for turning off: http://esp8266-ip-address/off
@@ -89,9 +89,11 @@ then the system sends IR recorded command to air conditioner to turn it Off.
 If current temperature is higher than "temperature maximum" plus "temperature delta maximum",
 then an alarm sound activated.
 
-If current status is On and elapsed time from last condition is more then maxOn (minutes),
-then the system sends IR recorded command to air conditioner to turn it Off.
+If current status is On and temperature between minimum and maximum and elapsed time from last condition
+is more then maxOn (minutes), then the system sends IR recorded command to air conditioner to turn it Off.
 
+If current status is On and temperature higher than "temperature maximum" and elapsed time from last condition
+is more then maxOn (minutes), then an alarm sound activated.
 ---
 
 
