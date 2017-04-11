@@ -52,8 +52,8 @@ IRremote.h - Turn off all #define SEND_*, #define DECODE_*
 Real number  Title on plate  Description
 03               RX          Firmware upload failed when an active load at the pin
 16               D0          Not started when an active load at the pin
-05           SLC/D1,  SLC
-04           SDA/D2,  SDA
+05           SCL/D1, SCL
+04           SDA/D2, SDA
 00               D3
 02               D4          Internal LED
 14               D5
